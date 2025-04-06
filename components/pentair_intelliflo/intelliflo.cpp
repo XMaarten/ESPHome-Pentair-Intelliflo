@@ -8,6 +8,7 @@ namespace intelliflo {
 static const char *const TAG = "intelliflo";
 
 void Intelliflo::setup() {
+  this->commandLocalProgram(2);
 }
 
 void Intelliflo::loop() {
@@ -203,7 +204,6 @@ void Intelliflo::send_array_cmd(const uint8_t *data, size_t len) {
 
 void Intelliflo::update() {
   this->requestPumpStatus();
-  this->commandLocalProgram(1);
   this->pumpToLocalControl();
 }
 
