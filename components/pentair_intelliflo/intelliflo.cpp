@@ -113,7 +113,7 @@ void Intelliflo::parse_packet(const std::vector<uint8_t> &data) {
     } else if (data[4] == 0x04 && data[6] == 0xFF) {
       ESP_LOGI(TAG, "Pump is remote");
     } else if (data[4] == 0x05) {
-      ESP_LOGI(TAG, "Pump goes to local program %02x", data[7]);
+      ESP_LOGI(TAG, "Pump goes to local program %d", data[7]);
     } else if (data[4] == 0x07) {
       // we have a pump status packet
 
@@ -126,7 +126,7 @@ void Intelliflo::parse_packet(const std::vector<uint8_t> &data) {
             this->running_->publish_state(true);
             break;
           default:
-            ESP_LOGW(TAG, "Received unknown running value %0x02x", data[6]);
+            ESP_LOGW(TAG, "Received unknown running value %d", data[6]);
             break;
         }
 
