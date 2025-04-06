@@ -3,7 +3,6 @@
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/sensor/sensor.h"
 // #include "esphome/components/switch/switch.h"
-#include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
 // #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
@@ -86,17 +85,12 @@ class Intelliflo : public uart::UARTDevice, public PollingComponent {
 
   binary_sensor::BinarySensor *running_;
 
-  text_sensor::TextSensor *program_;
-
  public:
   void set_power(sensor::Sensor *sensor) { power_ = sensor; }
   void set_rpm(sensor::Sensor *sensor) { rpm_ = sensor; }
   void set_flow(sensor::Sensor *sensor) { flow_ = sensor; }
   void set_pressure(sensor::Sensor *sensor) { pressure_ = sensor; }
-
   void set_running(binary_sensor::BinarySensor *sensor) { running_ = sensor; }
-
-  void set_program(text_sensor::TextSensor *sensor) { program_ = sensor; }
 
   void commandLocalProgram(int prog);
 };

@@ -130,60 +130,10 @@ void Intelliflo::parse_packet(const std::vector<uint8_t> &data) {
             break;
         }
 
-      if (this->program_ != nullptr)
-        switch (data[7]) {
-          case NO_PROG:
-            this->program_->publish_state("No program");
-            break;
-          case LOCAL1:
-            this->program_->publish_state("Local 1");
-            break;
-          case LOCAL2:
-            this->program_->publish_state("Local 2");
-            break;
-          case LOCAL3:
-            this->program_->publish_state("Local 3");
-            break;
-          case LOCAL4:
-            this->program_->publish_state("Local 4");
-            break;
-          case EXT1:
-            this->program_->publish_state("External 1");
-            break;
-          case EXT2:
-            this->program_->publish_state("External 2");
-            break;
-          case EXT3:
-            this->program_->publish_state("External 3");
-            break;
-          case EXT4:
-            this->program_->publish_state("External 4");
-            break;
-          case TIMEOUT:
-            this->program_->publish_state("Time Out");
-            break;
-          case PRIMING:
-            this->program_->publish_state("Priming");
-            break;
-          case QUICKCLEAN:
-            this->program_->publish_state("Quick Clean");
-            break;
-          case UNKNOWN:
-            this->program_->publish_state("Unknown");
-            break;
-          default:
-            ESP_LOGW(TAG, "Received unknown program value %0x02x", data[7]);
-            break;
-        }
-
       if (this->power_ != nullptr)
         this->power_->publish_state((data[9] * 256) + data[10]);
       if (this->rpm_ != nullptr)
         this->rpm_->publish_state((data[11] * 256) + data[12]);
-      if (this->flow_ != nullptr)
-        this->flow_->publish_state(data[13] * 0.227);  // GPM to m3/hr
-      if (this->pressure_ != nullptr)
-        this->pressure_->publish_state(data[14] / 14.504);  // PSI to bar
     }
   }
 }
