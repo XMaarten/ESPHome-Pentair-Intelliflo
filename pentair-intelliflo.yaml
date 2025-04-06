@@ -34,6 +34,7 @@ uart:
     baud_rate: 9600
 
 pentair_intelliflo:
+  id: pentairpump
 
 sensor:
   - platform: pentair_intelliflo
@@ -47,43 +48,22 @@ binary_sensor:
     running:
       name: "Running"
 
-text_sensor:
-  - platform: pentair_intelliflo
-    program:
-      name: "Program"
-
-number: # Not implemented yet
-  - platform: pentair_intelliflo
-    name: "Pool Pump RPM"
-    id: id_number_rpm
-    step: 100
-    min_value: 1000
-    max_value: 2600
-
-switch: # Not implemented yet
-  - platform: pentair_intelliflo
-    name: Pool Pump Switch
-    id: id_switch
-
 button:
   - platform: template
-    name: Set Pump ECO
+    name: Set Pump1 Program 1
     on_press:
       then:
-        - number.set:
-            id: id_number_rpm
-            value: 1200
+      - lambda: |-
+         id(pentairpump).commandLocalProgram(1);
   - platform: template
-    name: Set Pump NORMAL
+    name: Set Pump1 Program 2
     on_press:
       then:
-        - number.set:
-            id: id_number_rpm
-            value: 1500
+      - lambda: |-
+         id(pentairpump).commandLocalProgram(2);
   - platform: template
-    name: Set Pump HI
+    name: Set Pump1 Program 3
     on_press:
       then:
-        - number.set:
-            id: id_number_rpm
-            value: 2500
+      - lambda: |-
+         id(pentairpump).commandLocalProgram(3);
