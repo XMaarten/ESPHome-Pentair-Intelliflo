@@ -33,6 +33,13 @@ enum program : uint8_t {
   UNKNOWN = 0xFF,
 };
 
+enum pump: uint8_t {
+  PUMP1 = 0x60,
+  PUMP2 = 0x61,
+  PUMP3 = 0x62,
+  PUMP4 = 0x63,
+};
+
 class Intelliflo : public uart::UARTDevice, public PollingComponent {
   void switch_command(const std::string &command);
   void setup() override;

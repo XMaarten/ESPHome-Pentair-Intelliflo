@@ -103,112 +103,87 @@ bool Intelliflo::validate_received_message() {
 }
 
 void Intelliflo::parse_packet(const std::vector<uint8_t> &data) {
-  if (data[3] == 0x60 && data[4] == 0x01) {
-    ESP_LOGI(TAG, "Pump goes to ext program %d", data[6]);
-  } else if (data[3] == 0x60 && data[4] == 0x04 && data[6] == 0x00) {
-    ESP_LOGI(TAG, "Pump is local");
-  } else if (data[3] == 0x60 && data[4] == 0x04 && data[6] == 0xFF) {
-    ESP_LOGI(TAG, "Pump is remote");
-  } else if (data[3] == 0x60 && data[4] == 0x05) {
-    ESP_LOGI(TAG, "Pump goes to local program %02x", data[7]);
-  } else if (data[3] == 0x60 && data[4] == 0x07) {
-    // we have a pump status packet
+  if (data[3] == 0x60 || data[3] == 0x61 || data[3] == 0x62 || data[4] == 0x64) {
+    if (data[4] == 0x01) {
+      ESP_LOGI(TAG, "Pump goes to ext program %d", data[6]);
+    } else if (data[3] == 0x60 && data[4] == 0x04 && data[6] == 0x00) {
+      ESP_LOGI(TAG, "Pump is local");
+    } else if (data[3] == 0x60 && data[4] == 0x04 && data[6] == 0xFF) {
+      ESP_LOGI(TAG, "Pump is remote");
+    } else if (data[3] == 0x60 && data[4] == 0x05) {
+      ESP_LOGI(TAG, "Pump goes to local program %02x", data[7]);
+    } else if (data[3] == 0x60 && data[4] == 0x07) {
+      // we have a pump status packet
 
-    if (this->running_ != nullptr)
-      switch (data[6]) {
-        case STOPPED:
-          this->running_->publish_state(false);
-          break;
-        case RUNNING:
-          this->running_->publish_state(true);
-          break;
-        default:
-          ESP_LOGW(TAG, "Received unknown running value %0x02x", data[6]);
-          break;
-      }
+      if (this->running_ != nullptr)
+        switch (data[6]) {
+          case STOPPED:
+            this->running_->publish_state(false);
+            break;
+          case RUNNING:
+            this->running_->publish_state(true);
+            break;
+          default:
+            ESP_LOGW(TAG, "Received unknown running value %0x02x", data[6]);
+            break;
+        }
 
-    if (this->program_ != nullptr)
-      switch (data[7]) {
-        case NO_PROG:
-          this->program_->publish_state("");
-          break;
-        case LOCAL1:
-          this->program_->publish_state("Local 1");
-          break;
-        case LOCAL2:
-          this->program_->publish_state("Local 2");
-          break;
-        case LOCAL3:
-          this->program_->publish_state("Local 3");
-          break;
-        case LOCAL4:
-          this->program_->publish_state("Local 4");
-          break;
-        case EXT1:
-          this->program_->publish_state("External 1");
-          break;
-        case EXT2:
-          this->program_->publish_state("External 2");
-          break;
-        case EXT3:
-          this->program_->publish_state("External 3");
-          break;
-        case EXT4:
-          this->program_->publish_state("External 4");
-          break;
-        case TIMEOUT:
-          this->program_->publish_state("Time Out");
-          break;
-        case PRIMING:
-          this->program_->publish_state("Priming");
-          break;
-        case QUICKCLEAN:
-          this->program_->publish_state("Quick Clean");
-          break;
-        case UNKNOWN:
-          this->program_->publish_state("Unknown");
-          break;
-        default:
-          ESP_LOGW(TAG, "Received unknown program value %0x02x", data[7]);
-          break;
-      }
+      if (this->program_ != nullptr)
+        switch (data[7]) {
+          case NO_PROG:
+            this->program_->publish_state("No program");
+            break;
+          case LOCAL1:
+            this->program_->publish_state("Local 1");
+            break;
+          case LOCAL2:
+            this->program_->publish_state("Local 2");
+            break;
+          case LOCAL3:
+            this->program_->publish_state("Local 3");
+            break;
+          case LOCAL4:
+            this->program_->publish_state("Local 4");
+            break;
+          case EXT1:
+            this->program_->publish_state("External 1");
+            break;
+          case EXT2:
+            this->program_->publish_state("External 2");
+            break;
+          case EXT3:
+            this->program_->publish_state("External 3");
+            break;
+          case EXT4:
+            this->program_->publish_state("External 4");
+            break;
+          case TIMEOUT:
+            this->program_->publish_state("Time Out");
+            break;
+          case PRIMING:
+            this->program_->publish_state("Priming");
+            break;
+          case QUICKCLEAN:
+            this->program_->publish_state("Quick Clean");
+            break;
+          case UNKNOWN:
+            this->program_->publish_state("Unknown");
+            break;
+          default:
+            ESP_LOGW(TAG, "Received unknown program value %0x02x", data[7]);
+            break;
+        }
 
-    // this->status = packet.data[2];   // 0x01=Priming 0x02=Running 0xFF=?
-    if (this->power_ != nullptr)
-      this->power_->publish_state((data[9] * 256) + data[10]);
-    if (this->rpm_ != nullptr)
-      this->rpm_->publish_state((data[11] * 256) + data[12]);
-    if (this->flow_ != nullptr)
-      this->flow_->publish_state(data[13] * 0.227);  // GPM to m3/hr
-    if (this->pressure_ != nullptr)
-      this->pressure_->publish_state(data[14] / 14.504);  // PSI to bar
-    //
-    //
-    // this->timer_hour = packet.data[11];
-    // this->timer_min = packet.data[12];
-    // this->hour = packet.data[13];
-    // this->minutes = packet.data[14];
-
-    // ESP_LOGI(TAG, "R: 0x%02x - M: 0x%02x (%s) - St: 0x%02x", pc->running, pc->mode, pc->getMode()._to_string(),
-    //          pc->status);
-    // ESP_LOGI(TAG, "P: %dW - Sp: %dtr/min - F: %.2fm3/h - P: %.2fbar", pc->watts, pc->rpm, pc->flow, pc->pressure);
-    // ESP_LOGI(TAG, "B9: 0x%02x - B10: 0x%02x - Tmr: %d:%02d - Hr: %d:%02d", packet.data[9], packet.data[10],
-    //          pc->timer_hour, pc->timer_min, pc->hour, pc->minutes);
-  } else if (data[3] == 0x60 && data[4] == 0x09) {
-    // ESP_LOGI(TAG, "Pump goes to flow mode: %0.1f m3/h", ((double) packet.data[1]) / 10);
-  } else if (data[3] == 0x60 && data[4] == 0x0A) {
-    // ESP_LOGI(TAG, "Pump goes to rpm mode: %d rpm", (packet.data[0] * 256) + packet.data[1]);
-    // } else if (data[3] == 0x60 && packet.length == 1 && data[4] == 0xFF) {
-    //   ESP_LOGW(TAG, "CMD error: %02x", packet.data[0]);
-  } else {
-    // if (Debug.isActive(Debug.INFO)) {
-    //   char hd_buffer[(6 + packet.length + 2) * 3];
-    //   char *ptr_hd;
-    //   ptr_hd = hd_buffer;
-    //   for (int j = start; j < start + 6 + packet.length + 2; j++) {
-    //     ptr_hd += sprintf(ptr_hd, " %02x", (unsigned char) data[j]);
-    // }
-    // ESP_LOGI(TAG, "undecoded packet:%s", hd_buffer);
+      // this->status = packet.data[2];   // 0x01=Priming 0x02=Running 0xFF=?
+      if (this->power_ != nullptr)
+i        this->power_->publish_state((data[9] * 256) + data[10]);
+      if (this->rpm_ != nullptr)
+        this->rpm_->publish_state((data[11] * 256) + data[12]);
+      if (this->flow_ != nullptr)
+        this->flow_->publish_state(data[13] * 0.227);  // GPM to m3/hr
+      if (this->pressure_ != nullptr)
+        this->pressure_->publish_state(data[14] / 14.504);  // PSI to bar
+    }
   }
 }
 
