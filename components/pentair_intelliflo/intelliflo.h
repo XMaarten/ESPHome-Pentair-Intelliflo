@@ -73,7 +73,7 @@ class Intelliflo : public uart::UARTDevice, public PollingComponent {
   void pumpToRemoteControl();
   void run();
   void stop();
-  void commandLocalProgram(int prog);
+//  void commandLocalProgram(int prog);
   void commandExternalProgram(int prog);
   void saveValueForProgram(int prog, int value);
   void commandRPM(int rpm);
@@ -97,6 +97,8 @@ class Intelliflo : public uart::UARTDevice, public PollingComponent {
   void set_running(binary_sensor::BinarySensor *sensor) { running_ = sensor; }
 
   void set_program(text_sensor::TextSensor *sensor) { program_ = sensor; }
+
+  void commandLocalProgram(int prog);
 };
 
 }  // namespace intelliflo
