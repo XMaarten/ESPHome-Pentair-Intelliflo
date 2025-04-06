@@ -106,13 +106,13 @@ void Intelliflo::parse_packet(const std::vector<uint8_t> &data) {
   if (data[3] == 0x60 || data[3] == 0x61 || data[3] == 0x62 || data[4] == 0x64) {
     if (data[4] == 0x01) {
       ESP_LOGI(TAG, "Pump goes to ext program %d", data[6]);
-    } else if (data[3] == 0x60 && data[4] == 0x04 && data[6] == 0x00) {
+    } else if (data[4] == 0x04 && data[6] == 0x00) {
       ESP_LOGI(TAG, "Pump is local");
-    } else if (data[3] == 0x60 && data[4] == 0x04 && data[6] == 0xFF) {
+    } else if (data[4] == 0x04 && data[6] == 0xFF) {
       ESP_LOGI(TAG, "Pump is remote");
-    } else if (data[3] == 0x60 && data[4] == 0x05) {
+    } else if (data[4] == 0x05) {
       ESP_LOGI(TAG, "Pump goes to local program %02x", data[7]);
-    } else if (data[3] == 0x60 && data[4] == 0x07) {
+    } else if (data[4] == 0x07) {
       // we have a pump status packet
 
       if (this->running_ != nullptr)
@@ -174,9 +174,8 @@ void Intelliflo::parse_packet(const std::vector<uint8_t> &data) {
             break;
         }
 
-      // this->status = packet.data[2];   // 0x01=Priming 0x02=Running 0xFF=?
       if (this->power_ != nullptr)
-i        this->power_->publish_state((data[9] * 256) + data[10]);
+        this->power_->publish_state((data[9] * 256) + data[10]);
       if (this->rpm_ != nullptr)
         this->rpm_->publish_state((data[11] * 256) + data[12]);
       if (this->flow_ != nullptr)
