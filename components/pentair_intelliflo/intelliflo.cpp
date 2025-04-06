@@ -7,7 +7,9 @@ namespace intelliflo {
 
 static const char *const TAG = "intelliflo";
 
-void Intelliflo::setup() {}
+void Intelliflo::setup() {
+  pumpToLocalControl();
+}
 
 void Intelliflo::loop() {
   while (this->available() > 0) {
@@ -202,7 +204,6 @@ void Intelliflo::send_array_cmd(const uint8_t *data, size_t len) {
 
 void Intelliflo::update() {
   this->requestPumpStatus();
-  this->pumpToLocalControl();
 }
 
 // request pump status
