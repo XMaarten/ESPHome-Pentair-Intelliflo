@@ -48,22 +48,19 @@ binary_sensor:
     running:
       name: "Running"
 
-button:
+select:
   - platform: template
-    name: Set Pump1 Program 1
-    on_press:
+    name: PumpProgram
+    id: pumpprogram
+    options:
+     - "Program 1"
+     - "Program 2"
+     - "Program 3"    
+     - "Program 4"    
+    initial_option: "Program 1"
+    optimistic: true    
+    on_value:
       then:
       - lambda: |-
-         id(pentairpump).commandLocalProgram(1);
-  - platform: template
-    name: Set Pump1 Program 2
-    on_press:
-      then:
-      - lambda: |-
-         id(pentairpump).commandLocalProgram(2);
-  - platform: template
-    name: Set Pump1 Program 3
-    on_press:
-      then:
-      - lambda: |-
-         id(pentairpump).commandLocalProgram(3);
+         auto program = i + 1;
+         id(pentairpump).commandLocalProgram(program);
