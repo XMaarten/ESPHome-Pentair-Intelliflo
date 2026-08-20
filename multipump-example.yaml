@@ -1,0 +1,82 @@
+# Minimal two-pump example. Add your board-specific UART pins and other ESPHome
+# configuration around this snippet.
+
+uart:
+  id: rs485
+  tx_pin: GPIO22
+  rx_pin: GPIO21
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 512
+
+pentair_intelliflo:
+  id: pentair_bus
+  uart_id: rs485
+  update_interval: 20s
+  pumps:
+    - id: pump_1
+      address: 1
+    - id: pump_2
+      address: 2
+
+sensor:
+  - platform: pentair_intelliflo
+    pump_id: pump_1
+    power:
+      name: "Pump 1 Power"
+    rpm:
+      name: "Pump 1 Speed"
+
+  - platform: pentair_intelliflo
+    pump_id: pump_2
+    power:
+      name: "Pump 2 Power"
+    rpm:
+      name: "Pump 2 Speed"
+
+binary_sensor:
+  - platform: pentair_intelliflo
+    pump_id: pump_1
+    running:
+      name: "Pump 1 Running"
+    remote_control:
+      name: "Pump 1 Remote Control"
+
+  - platform: pentair_intelliflo
+    pump_id: pump_2
+    running:
+      name: "Pump 2 Running"
+    remote_control:
+      name: "Pump 2 Remote Control"
+
+text_sensor:
+  - platform: pentair_intelliflo
+    pump_id: pump_1
+    program:
+      name: "Pump 1 Program"
+    pump_state:
+      name: "Pump 1 Drive State"
+    error:
+      name: "Pump 1 Error"
+
+  - platform: pentair_intelliflo
+    pump_id: pump_2
+    program:
+      name: "Pump 2 Program"
+    pump_state:
+      name: "Pump 2 Drive State"
+    error:
+      name: "Pump 2 Error"
+
+button:
+  - platform: template
+    name: "Request pump 1 status"
+    on_press:
+      - lambda: 'id(pump_1).request_status();'
+
+  - platform: template
+    name: "Request pump 2 status"
+    on_press:
+      - lambda: 'id(pump_2).request_status();'

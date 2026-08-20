@@ -12,16 +12,14 @@ from esphome.const import (
     UNIT_WATT,
 )
 
-from . import CONF_PENTAIR_INTELLIFLO_ID, PENTAIR_INTELLIFLO_CHILD_SCHEMA
+from . import CONF_PUMP_ID, PENTAIR_INTELLIFLO_PUMP_CHILD_SCHEMA
 
 DEPENDENCIES = ["pentair_intelliflo"]
-
 CONF_RPM = "rpm"
 CONF_FLOW = "flow"
 CONF_FILTER_PERCENT = "filter_percent"
 CONF_ERROR_CODE = "error_code"
 CONF_TIME_REMAINING = "time_remaining"
-
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.Optional(CONF_POWER): sensor.sensor_schema(
@@ -64,8 +62,7 @@ CONFIG_SCHEMA = cv.Schema(
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
     }
-).extend(PENTAIR_INTELLIFLO_CHILD_SCHEMA)
-
+).extend(PENTAIR_INTELLIFLO_PUMP_CHILD_SCHEMA)
 SETTERS = {
     CONF_POWER: "set_power_sensor",
     CONF_RPM: "set_rpm_sensor",
@@ -77,8 +74,8 @@ SETTERS = {
 
 
 async def to_code(config):
-    parent = await cg.get_variable(config[CONF_PENTAIR_INTELLIFLO_ID])
+    pump = await cg.get_variable(config[CONF_PUMP_ID])
     for key, setter in SETTERS.items():
         if key in config:
             sens = await sensor.new_sensor(config[key])
-            cg.add(getattr(parent, setter)(sens))
+            cg.add(getattr(pump, setter)(sens))

@@ -3,14 +3,13 @@ import esphome.config_validation as cv
 from esphome.components import text_sensor
 from esphome.const import ENTITY_CATEGORY_DIAGNOSTIC
 
-from . import CONF_PENTAIR_INTELLIFLO_ID, PENTAIR_INTELLIFLO_CHILD_SCHEMA
+from . import CONF_PUMP_ID, PENTAIR_INTELLIFLO_PUMP_CHILD_SCHEMA
 
 DEPENDENCIES = ["pentair_intelliflo"]
 
 CONF_PROGRAM = "program"
 CONF_PUMP_STATE = "pump_state"
 CONF_ERROR = "error"
-
 CONFIG_SCHEMA = cv.Schema(
     {
         # Which mode/program the pump reports it is following.
@@ -26,8 +25,7 @@ CONFIG_SCHEMA = cv.Schema(
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
     }
-).extend(PENTAIR_INTELLIFLO_CHILD_SCHEMA)
-
+).extend(PENTAIR_INTELLIFLO_PUMP_CHILD_SCHEMA)
 SETTERS = {
     CONF_PROGRAM: "set_program_text_sensor",
     CONF_PUMP_STATE: "set_pump_state_text_sensor",
@@ -36,8 +34,8 @@ SETTERS = {
 
 
 async def to_code(config):
-    parent = await cg.get_variable(config[CONF_PENTAIR_INTELLIFLO_ID])
+    pump = await cg.get_variable(config[CONF_PUMP_ID])
     for key, setter in SETTERS.items():
         if key in config:
             sens = await text_sensor.new_text_sensor(config[key])
-            cg.add(getattr(parent, setter)(sens))
+            cg.add(getattr(pump, setter)(sens))
