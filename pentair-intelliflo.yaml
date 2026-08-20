@@ -72,8 +72,8 @@ captive_portal:
 external_components:
   - source:
       type: git
-      url: https://github.com/gamer22026/ESPHome-Pentair-Intelliflo
-      ref: main
+      url: https://github.com/XMaarten/ESPHome-Pentair-Intelliflo
+      ref: feature/multi-pump-controller
     components: [pentair_intelliflo]
     refresh: 0s # always re-fetch; drop this to cache between builds
 
@@ -130,10 +130,12 @@ uart:
 ################################ the pump ######################################
 
 pentair_intelliflo:
-  id: pump
+  id: pentair_bus
   uart_id: rs485
-  address: 0x60 # first pump on the bus; 0x61.. for additional pumps
-  update_interval: 20s # background status poll
+  update_interval: 20s # background status poll for all registered pumps
+  pumps:
+    - id: pump
+      address: 1 # Pentair pump address 1 maps to wire address 0x60
 
 globals:
   # Suppresses the command burst that restoring saved entity values would
@@ -285,7 +287,7 @@ select:
 
 sensor:
   - platform: pentair_intelliflo
-    pentair_intelliflo_id: pump
+    pump_id: pump
     power:
       name: Power
     rpm:
@@ -310,7 +312,7 @@ sensor:
 
 binary_sensor:
   - platform: pentair_intelliflo
-    pentair_intelliflo_id: pump
+    pump_id: pump
     running:
       name: Running
     remote_control:
@@ -321,7 +323,7 @@ binary_sensor:
 
 text_sensor:
   - platform: pentair_intelliflo
-    pentair_intelliflo_id: pump
+    pump_id: pump
     program:
       name: Program
     pump_state:

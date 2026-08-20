@@ -1,146 +1,211 @@
-# Pentair IntelliFlo VS → ESPHome → Home Assistant
+# Pentair IntelliFlo → ESPHome → Home Assistant
 
-For a LILYGO T-CAN485 (ESP32) wired to the pump's RS-485 pair (yellow = A/+, green = B/−).
+ESPHome external component for Pentair IntelliFlo pumps connected over the Pentair RS-485 automation bus.
+
+The component supports multiple addressed pumps on a single shared RS-485 bus. One ESPHome controller owns the UART, receive parser and transmit queue; received frames are dispatched to the matching pump by source address.
+
+## Multi-pump architecture
+
+Pentair pump addresses 1 through 16 map to wire addresses `0x60` through `0x6F`:
+
+| Pump address | Wire address |
+| ---: | ---: |
+| 1 | `0x60` |
+| 2 | `0x61` |
+| 3 | `0x62` |
+| ... | ... |
+| 16 | `0x6F` |
+
+All pumps may share the same two-wire RS-485 bus. Each pump must have a unique address configured on the pump itself and the same address in ESPHome.
+
+```text
+ESP32 / RS-485 controller
+        |
+        +---- Pump 1 (address 1 / 0x60)
+        |
+        +---- Pump 2 (address 2 / 0x61)
+        |
+        +---- ...
+```
+
+The controller performs all bus I/O centrally. Pump objects contain only pump-specific state, entities, addressing and commands.
 
 ## Install
 
-Copy `pentair-intelliflo.yaml` into your Home Assistant ESPHome config directory.
-The component itself is pulled from this repo at build time, so there are no files
-to place by hand:
+For development/testing of the multi-pump branch:
 
 ```yaml
 external_components:
   - source:
       type: git
-      url: https://github.com/gamer22026/ESPHome-Pentair-Intelliflo
-      ref: main
+      url: https://github.com/XMaarten/ESPHome-Pentair-Intelliflo
+      ref: feature/multi-pump-controller
     components: [pentair_intelliflo]
     refresh: 0s
 ```
 
-The only secrets this config needs are `wifi_ssid` and `wifi_password` — the two
-the ESPHome dashboard already sets up. Nothing else to add.
+After the multi-pump changes are merged upstream, the source should point back to the upstream repository and `main` branch.
 
-The API is unencrypted and OTA has no password, which keeps the secret list to
-those two. To harden either one, add a key to your ESPHome secrets and uncomment
-the relevant line in the YAML:
+## Controller configuration
 
-```yaml
-api:
-  encryption:
-    key: !secret pool_pump_api_key      # openssl rand -base64 32
-
-ota:
-  - platform: esphome
-    password: !secret pool_pump_ota_password
-```
-
-Verified against ESPHome 2026.7.2 — `esphome config` and `esphome compile` both
-pass on `esp-idf` and on `arduino`.
-
-If you would rather iterate on the C++ without a push/refresh cycle, clone the
-repo next to the YAML and swap the source for a local path:
+A single pump:
 
 ```yaml
-external_components:
-  - source:
-      type: local
-      path: components
-    components: [pentair_intelliflo]
+pentair_intelliflo:
+  id: pentair_bus
+  uart_id: rs485
+  update_interval: 20s
+  pumps:
+    - id: pump_1
+      address: 1
 ```
 
-## Board pins (LILYGO T-CAN485)
+Two pumps on the same bus:
+
+```yaml
+pentair_intelliflo:
+  id: pentair_bus
+  uart_id: rs485
+  update_interval: 20s
+  pumps:
+    - id: pump_1
+      address: 1
+    - id: pump_2
+      address: 2
+```
+
+Addresses must be unique on a controller. ESPHome configuration validation rejects duplicate addresses.
+
+## UART configuration
+
+The Pentair automation bus uses 9600 baud, 8 data bits, no parity and one stop bit:
+
+```yaml
+uart:
+  id: rs485
+  tx_pin: GPIO22
+  rx_pin: GPIO21
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 512
+```
+
+The GPIO values above are for the LILYGO T-CAN485 example configuration. Adapt them for other RS-485 hardware.
+
+## LILYGO T-CAN485 pins
 
 | Signal | GPIO | Notes |
 | --- | --- | --- |
 | RS485 TX | 22 | |
 | RS485 RX | 21 | |
-| `PIN_5V_EN` | 16 | must be HIGH — powers the transceiver |
-| `RS485_EN` | 17 | must be HIGH |
-| `RS485_SE` | 19 | must be HIGH — enables automatic TX/RX turnaround |
+| `PIN_5V_EN` | 16 | Must be HIGH; powers the transceiver |
+| `RS485_EN` | 17 | Must be HIGH |
+| `RS485_SE` | 19 | Must be HIGH; enables automatic TX/RX turnaround |
 
-Source: [`Xinyuan-LilyGO/T-CAN485` → `example/Arduino/RS485/config.h`](https://github.com/Xinyuan-LilyGO/T-CAN485).
-The three enable pins are driven HIGH by `gpio` switches with
-`restore_mode: ALWAYS_ON`. Because the board handles direction itself there is no
-DE pin to toggle around writes. Do **not** add a `psram:` block — GPIO16/17 are
-the PSRAM pins on WROVER modules and would collide.
+The T-CAN485 handles direction switching itself, so no separate DE pin needs to be toggled around writes.
 
-## Entities
+## Pump entities
 
-**Control**
+Entity platforms reference an individual pump using `pump_id`.
 
-| Entity | Behaviour |
-| --- | --- |
-| `select` **Preset** | Off / Low / Medium / High / Max. Picking a speed while stopped starts the pump. |
-| `number` **Speed setpoint** | Any RPM in range. Changing it while running ramps the pump; while stopped it starts it. |
-| `switch` **Pump** | Master on/off. |
-| `select` **Control method** | `Direct RPM` or `External Program 1` — see below. |
-| `button` **Release to local control** | Stops the pump and unlocks its keypad. |
+```yaml
+sensor:
+  - platform: pentair_intelliflo
+    pump_id: pump_1
+    power:
+      name: "Pump 1 Power"
+    rpm:
+      name: "Pump 1 Speed"
 
-**Status** — Power (W), Speed (RPM), Flow (GPM), Filter cycle used (%), Error code,
-Time remaining, Running, Remote control, Program, Drive state, Error.
+  - platform: pentair_intelliflo
+    pump_id: pump_2
+    power:
+      name: "Pump 2 Power"
+    rpm:
+      name: "Pump 2 Speed"
+```
 
-## How control works
+The same applies to binary and text sensors:
 
-Every command is a `0xA5` automation-bus frame addressed to the pump at `0x60`,
-sent as `FF 00 FF A5 00 60 10 <cmd> <len> <payload> <ckHi> <ckLo>`:
+```yaml
+binary_sensor:
+  - platform: pentair_intelliflo
+    pump_id: pump_1
+    running:
+      name: "Pump 1 Running"
+    remote_control:
+      name: "Pump 1 Remote Control"
 
-| Purpose | Frame |
-| --- | --- |
-| Request status | `A5 00 60 10 07 00` |
-| Take remote control | `A5 00 60 10 04 01 FF` |
-| Release to local | `A5 00 60 10 04 01 00` |
-| Start drive | `A5 00 60 10 06 01 0A` |
-| Stop drive | `A5 00 60 10 06 01 04` |
-| Set speed (direct) | `A5 00 60 10 01 04 02 C4 <rpmHi> <rpmLo>` |
-| Store speed in program N | `A5 00 60 10 01 04 03 <0x26+N> <rpmHi> <rpmLo>` |
-| Activate program N | `A5 00 60 10 01 04 03 21 00 <N*8>` |
+text_sensor:
+  - platform: pentair_intelliflo
+    pump_id: pump_1
+    program:
+      name: "Pump 1 Program"
+    pump_state:
+      name: "Pump 1 Drive State"
+    error:
+      name: "Pump 1 Error"
+```
 
-A single `push_state` script reconciles the pump with whatever the HA entities
-say, and a 15 s `interval` re-runs it. That keepalive matters: the pump falls back
-to its own keypad and schedule once it stops hearing from the bus, which is also
-the failsafe if the ESP32 dies.
+Available status entities include power, RPM, flow, filter-cycle percentage, error code, time remaining, running state, remote-control state, program, drive state and error text.
 
-Smooth transitions come for free — the pump ramps internally, so changing speed is
-just a new `02 C4` write, and starting from stopped is a speed write followed by
-`06 01 0A`.
+Plain IntelliFlo VS pumps generally report zero for flow; VF/VSF models may report an actual flow value. The field previously interpreted as pressure is exposed as filter-cycle percentage instead.
 
-### `Direct RPM` vs `External Program 1`
+## Pump commands
 
-`Direct RPM` writes register `0x02C4`, which is volatile and is what
-nodejs-poolController uses. It is the default. If your pump ignores it, switch the
-**Control method** select to `External Program 1`, which instead stores the speed
-in the pump's program 1 (register `0x0327`) and activates that program
-(register `0x0321`). Two caveats for that mode, both handled in the YAML:
+Pump IDs can be used directly from ESPHome lambdas:
 
-- `0x0327` is an EEPROM write, so it only happens when the setpoint actually
-  changes, never on the keepalive.
-- An externally activated program self-cancels after about a minute, so the
-  keepalive re-sends `0x0321` every 15 s.
+```yaml
+button:
+  - platform: template
+    name: "Start pump 1"
+    on_press:
+      - lambda: |-
+          id(pump_1).set_remote_control(true);
+          id(pump_1).set_speed_rpm(1800);
+          id(pump_1).set_pump_running(true);
 
-## What changed from the earlier revision
+  - platform: template
+    name: "Stop pump 2"
+    on_press:
+      - lambda: |-
+          id(pump_2).set_pump_running(false);
+```
 
-The component in this repo before this commit did not build or drive the pump:
+Useful pump methods include:
 
-1. `components/pentair_intelliflo/switch/` and `output/` are leftover **pipsolar**
-   files that `#include "../pipsolar.h"`, which does not exist. Every `.cpp` under
-   the component directory gets compiled, so the build fails. Dropped here.
-2. `select.py` calls `set_operating_mode_select()`, which is not declared in
-   `intelliflo.h`. Dropped; the YAML uses `select: platform: template` instead.
-3. `commandRPM()` wrote register `0x0327` (program 1's *stored* speed) without
-   ever activating program 1, so nothing changed the running speed.
-   `commandFlow()` used command `0x09`, which is not a write command. Both fixed.
-4. The `pressure` sensor read payload byte `[8]` and divided by 14.504. That byte
-   is filter-cycle percent used, not PSI. Replaced with `filter_percent`.
-5. The receiver required a literal `FF 00 FF A5` preamble and cleared the whole
-   buffer on any mismatch, so a longer run of idle `FF`s dropped the frame that
-   followed. Rewritten to sync on `00 FF A5` and discard one byte at a time.
-6. The example YAML re-sent the RPM write every 10 s. Under the old code path that
-   was an EEPROM write on every tick.
-7. Board was `esp32-s3-devkitc-1` on GPIO17/18; the T-CAN485 is a plain ESP32 on
-   GPIO22/21 and needs its three enable pins driven.
+- `request_status()`
+- `set_remote_control(bool)`
+- `set_pump_running(bool)`
+- `set_speed_rpm(uint16_t)`
+- `set_speed_gpm(uint8_t)`
+- `set_program_speed(program, rpm)`
+- `run_program(program)`
+- `set_speed_index(index)`
+
+## Bus handling
+
+Every command uses the Pentair `0xA5` automation-bus frame format. The configured pump address determines the destination byte. For pump address 1 the destination is `0x60`; for pump address 2 it is `0x61`, and so on.
+
+The controller has one receive parser and one transmit queue for the entire bus. Status requests for all registered pumps are queued during the polling interval and transmitted one at a time using the existing RS-485 bus timing and quiet-time handling.
+
+Frames received from registered pump addresses are routed to the corresponding pump object. Frames from unregistered addresses and controller self-echoes are ignored.
+
+## Single-pump full example
+
+`pentair-intelliflo.yaml` contains the original full Home Assistant control example adapted to the controller/pump API. It still configures one pump, which makes it suitable for initial testing of the refactor before connecting multiple pumps.
+
+`multipump-example.yaml` contains a smaller two-pump example focused on the shared-bus configuration.
+
+## Background and credits
+
+The protocol, parser and ESPHome fixes used as the basis for this work were developed in the `gamer22026/ESPHome-Pentair-Intelliflo` fork of the original `nicostrown/ESPHome-Pentair-Intelliflo` project.
+
+The multi-pump changes refactor bus ownership into one controller and add multiple pump objects on the same UART/RS-485 interface.
 
 ## Protocol references
 
-- [Controlling an IntelliFlo pump from Home Assistant](https://www.yoctopuce.com/EN/article/controlling-an-intelliflo-pump-from-home-assistant) — the frames above match its published bytes exactly
-- [nodejs-poolController wiki: Pumps](https://github.com/tagyoureit/nodejs-poolController/wiki/Pumps) — register map (`0x27`–`0x2A` program speeds, `0xC4` RPM, `0xE4` GPM)
+- [Controlling an IntelliFlo pump from Home Assistant](https://www.yoctopuce.com/EN/article/controlling-an-intelliflo-pump-from-home-assistant)
+- [nodejs-poolController wiki: Pumps](https://github.com/tagyoureit/nodejs-poolController/wiki/Pumps)
