@@ -209,3 +209,13 @@ The multi-pump changes refactor bus ownership into one controller and add multip
 
 - [Controlling an IntelliFlo pump from Home Assistant](https://www.yoctopuce.com/EN/article/controlling-an-intelliflo-pump-from-home-assistant)
 - [nodejs-poolController wiki: Pumps](https://github.com/tagyoureit/nodejs-poolController/wiki/Pumps)
+
+## Credits
+
+This project builds on the original work by [nicostrown](https://github.com/nicostrown/ESPHome-Pentair-Intelliflo).
+
+Additional protocol, ESPHome compatibility, parser and pump-control improvements were contributed through the work of [gamer22026](https://github.com/gamer22026/ESPHome-Pentair-Intelliflo).
+
+Support and findings for older IntelliFlo VS pumps were also informed by the work of [jostd](https://github.com/jostd/ESPHome-Pentair-Intelliflo-VS).
+
+Thanks to all contributors and community members who reverse-engineered and documented the Pentair RS-485 protocol.
