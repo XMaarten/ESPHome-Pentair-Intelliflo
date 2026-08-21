@@ -4,22 +4,41 @@ from esphome.components import uart
 from esphome.const import CONF_ADDRESS, CONF_ID
 
 DEPENDENCIES = ["uart"]
+AUTO_LOAD = ["sensor", "binary_sensor", "text_sensor"]
 MULTI_CONF = True
 
-CONF_PENTAIR_INTELLIFLO_ID = "pentair_intelliflo_id"
+CONF_PUMPS = "pumps"
+CONF_PUMP_ID = "pump_id"
 
 pentair_intelliflo_ns = cg.esphome_ns.namespace("pentair_intelliflo")
 PentairIntelliflo = pentair_intelliflo_ns.class_(
     "PentairIntelliflo", cg.PollingComponent, uart.UARTDevice
 )
+PentairIntellifloPump = pentair_intelliflo_ns.class_("PentairIntellifloPump")
+
+PUMP_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(PentairIntellifloPump),
+        cv.Required(CONF_ADDRESS): cv.int_range(min=1, max=16),
+    }
+)
+
+
+def _validate_pumps(pumps):
+    addresses = [pump[CONF_ADDRESS] for pump in pumps]
+    if len(addresses) != len(set(addresses)):
+        raise cv.Invalid("Pump addresses must be unique on an RS-485 bus")
+    return pumps
+
 
 CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(PentairIntelliflo),
-            # Pumps answer on 0x60 + pump index (0x60 for the first pump).
-            cv.Optional(CONF_ADDRESS, default=0x60): cv.hex_int_range(
-                min=0x60, max=0x6F
+            cv.Required(CONF_PUMPS): cv.All(
+                cv.ensure_list(PUMP_SCHEMA),
+                cv.Length(min=1, max=16),
+                _validate_pumps,
             ),
         }
     )
@@ -27,9 +46,9 @@ CONFIG_SCHEMA = (
     .extend(uart.UART_DEVICE_SCHEMA)
 )
 
-PENTAIR_INTELLIFLO_CHILD_SCHEMA = cv.Schema(
+PENTAIR_INTELLIFLO_PUMP_CHILD_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(CONF_PENTAIR_INTELLIFLO_ID): cv.use_id(PentairIntelliflo),
+        cv.GenerateID(CONF_PUMP_ID): cv.use_id(PentairIntellifloPump),
     }
 )
 
@@ -39,7 +58,11 @@ FINAL_VALIDATE_SCHEMA = uart.final_validate_device_schema(
 
 
 async def to_code(config):
-    var = cg.new_Pvariable(config[CONF_ID])
-    await cg.register_component(var, config)
-    await uart.register_uart_device(var, config)
-    cg.add(var.set_address(config[CONF_ADDRESS]))
+    controller = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(controller, config)
+    await uart.register_uart_device(controller, config)
+
+    for pump_config in config[CONF_PUMPS]:
+        pump = cg.new_Pvariable(pump_config[CONF_ID], controller)
+        cg.add(pump.set_address(pump_config[CONF_ADDRESS]))
+        cg.add(controller.register_pump(pump))

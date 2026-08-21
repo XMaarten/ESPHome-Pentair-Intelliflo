@@ -2,7 +2,7 @@
 
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
-
+#include <algorithm>
 #include <cinttypes>
 
 namespace esphome {
@@ -12,7 +12,6 @@ static const char *const TAG = "pentair_intelliflo";
 
 // We impersonate the pool controller.
 static const uint8_t CONTROLLER_ADDRESS = 0x10;
-
 // The pump is slow to turn the line around. Leave a gap between our frames.
 static const uint32_t TX_SPACING_MS = 200;
 // Give up on a half-received frame after this long.
@@ -21,7 +20,7 @@ static const uint32_t RX_IDLE_TIMEOUT_MS = 150;
 static const uint32_t RX_QUIET_MS = 20;
 
 static const uint8_t MAX_PAYLOAD_LEN = 32;
-static const size_t MAX_TX_QUEUE = 12;
+static const size_t MAX_TX_QUEUE = 64;
 static const uint16_t MAX_RPM = 3450;
 
 static std::string program_to_string(uint8_t value) {
@@ -86,23 +85,17 @@ static std::string error_to_string(uint8_t value) {
 void PentairIntelliflo::setup() { this->rx_.reserve(64); }
 
 void PentairIntelliflo::dump_config() {
-  ESP_LOGCONFIG(TAG, "Pentair IntelliFlo:");
-  ESP_LOGCONFIG(TAG, "  Pump address: 0x%02X", this->address_);
+  ESP_LOGCONFIG(TAG, "Pentair IntelliFlo controller:");
   LOG_UPDATE_INTERVAL(this);
-  LOG_SENSOR("  ", "Power", this->power_);
-  LOG_SENSOR("  ", "Speed", this->rpm_);
-  LOG_SENSOR("  ", "Flow", this->flow_);
-  LOG_SENSOR("  ", "Filter percent", this->filter_percent_);
-  LOG_SENSOR("  ", "Error code", this->error_code_);
-  LOG_SENSOR("  ", "Time remaining", this->time_remaining_);
-  LOG_BINARY_SENSOR("  ", "Running", this->running_);
-  LOG_BINARY_SENSOR("  ", "Remote control", this->remote_control_);
-  LOG_TEXT_SENSOR("  ", "Program", this->program_);
-  LOG_TEXT_SENSOR("  ", "Pump state", this->pump_state_);
-  LOG_TEXT_SENSOR("  ", "Error", this->error_);
+  ESP_LOGCONFIG(TAG, "  Registered pumps: %u", (unsigned) this->pumps_.size());
+  for (auto *pump : this->pumps_)
+    pump->dump_config();
 }
 
-void PentairIntelliflo::update() { this->request_status(); }
+void PentairIntelliflo::update() {
+  for (auto *pump : this->pumps_)
+    pump->request_status();
+}
 
 void PentairIntelliflo::loop() {
   const uint32_t now = millis();
@@ -120,6 +113,7 @@ void PentairIntelliflo::loop() {
 
   if (this->tx_queue_.empty() || now - this->last_tx_ms_ < TX_SPACING_MS)
     return;
+
   // Never talk over an inbound frame.
   if (now - this->last_rx_ms_ < RX_QUIET_MS)
     return;
@@ -135,11 +129,9 @@ void PentairIntelliflo::loop() {
 // Frames look like: [FF...] 00 FF A5 <proto> <dst> <src> <cmd> <len> <payload> <ckHi> <ckLo>
 // The leading 0xFF run is line idle/wake-up padding and its length varies, so we
 // sync on the "00 FF A5" sequence and only ever discard one byte at a time when
-// something does not line up. Discarding the whole buffer (as the upstream
-// component does) throws away the frame that follows a bad byte.
+// something does not line up.
 void PentairIntelliflo::feed_byte_(uint8_t byte) {
   this->rx_.push_back(byte);
-
   while (true) {
     if (!this->resync_())
       return;
@@ -203,17 +195,82 @@ void PentairIntelliflo::handle_frame_(size_t total) {
 
   ESP_LOGV(TAG, "RX: %s", format_hex_pretty(this->rx_.data(), total).c_str());
 
-  // Half-duplex means we usually hear our own frames (src 0x10) as well as
-  // anything else on the bus. Only our pump's replies are interesting.
-  if (src != this->address_)
+  // Half-duplex interfaces often hear their own transmitted frame (source 0x10).
+  // Dispatch replies by their pump source address; self-echoes will not match.
+  auto *pump = this->find_pump_(src);
+  if (pump == nullptr) {
+    ESP_LOGV(TAG, "Ignoring frame from unregistered pump address 0x%02X", src);
     return;
+  }
 
-  switch (cmd) {
+  pump->handle_frame(cmd, payload, len);
+}
+
+PentairIntellifloPump *PentairIntelliflo::find_pump_(uint8_t wire_address) {
+  for (auto *pump : this->pumps_) {
+    if (pump->get_wire_address() == wire_address)
+      return pump;
+  }
+  return nullptr;
+}
+
+void PentairIntelliflo::queue_command_(uint8_t wire_address, uint8_t command,
+                                        const std::vector<uint8_t> &payload) {
+  if (this->tx_queue_.size() >= MAX_TX_QUEUE) {
+    ESP_LOGW(TAG, "TX queue full, dropping command 0x%02X for pump 0x%02X", command, wire_address);
+    return;
+  }
+
+  // Everything from the 0xA5 up to the last payload byte is checksummed.
+  std::vector<uint8_t> body;
+  body.reserve(6 + payload.size());
+  body.push_back(0xA5);
+  body.push_back(0x00);  // protocol 0x00: pump messages
+  body.push_back(wire_address);
+  body.push_back(CONTROLLER_ADDRESS);
+  body.push_back(command);
+  body.push_back((uint8_t) payload.size());
+  body.insert(body.end(), payload.begin(), payload.end());
+
+  uint16_t sum = 0;
+  for (uint8_t b : body)
+    sum += b;
+
+  std::vector<uint8_t> frame;
+  frame.reserve(body.size() + 5);
+  frame.push_back(0xFF);  // idle padding so the pump's UART wakes up
+  frame.push_back(0x00);
+  frame.push_back(0xFF);
+  frame.insert(frame.end(), body.begin(), body.end());
+  frame.push_back((uint8_t) (sum >> 8));
+  frame.push_back((uint8_t) (sum & 0xFF));
+
+  this->tx_queue_.push_back(std::move(frame));
+}
+
+void PentairIntellifloPump::dump_config() {
+  ESP_LOGCONFIG(TAG, "  Pump address: %u (wire 0x%02X)", this->address_, this->wire_address_);
+  LOG_SENSOR("    ", "Power", this->power_);
+  LOG_SENSOR("    ", "Speed", this->rpm_);
+  LOG_SENSOR("    ", "Flow", this->flow_);
+  LOG_SENSOR("    ", "Filter percent", this->filter_percent_);
+  LOG_SENSOR("    ", "Error code", this->error_code_);
+  LOG_SENSOR("    ", "Time remaining", this->time_remaining_);
+  LOG_BINARY_SENSOR("    ", "Running", this->running_);
+  LOG_BINARY_SENSOR("    ", "Remote control", this->remote_control_);
+  LOG_TEXT_SENSOR("    ", "Program", this->program_);
+  LOG_TEXT_SENSOR("    ", "Pump state", this->pump_state_);
+  LOG_TEXT_SENSOR("    ", "Error", this->error_);
+}
+
+void PentairIntellifloPump::handle_frame(uint8_t command, const uint8_t *payload, uint8_t length) {
+  switch (command) {
     case 0x04:  // remote control acknowledgement
-      if (len >= 1) {
+      if (length >= 1) {
         const bool remote = payload[0] != 0x00;
         if (remote != this->remote_state_)
-          ESP_LOGI(TAG, "Pump switched to %s control", remote ? "REMOTE" : "LOCAL");
+          ESP_LOGI(TAG, "Pump %u (0x%02X) switched to %s control", this->address_, this->wire_address_,
+                   remote ? "REMOTE" : "LOCAL");
         this->remote_state_ = remote;
         if (this->remote_control_ != nullptr)
           this->remote_control_->publish_state(remote);
@@ -221,20 +278,22 @@ void PentairIntelliflo::handle_frame_(size_t total) {
       break;
 
     case 0x07:  // status
-      if (len >= 15) {
+      if (length >= 15) {
         this->publish_status_(payload);
       } else {
-        ESP_LOGW(TAG, "Status frame too short (%u payload bytes)", len);
+        ESP_LOGW(TAG, "Status frame from pump %u (0x%02X) too short (%u payload bytes)", this->address_,
+                 this->wire_address_, length);
       }
       break;
 
     default:
-      ESP_LOGD(TAG, "Pump acked command 0x%02X: %s", cmd, format_hex_pretty(payload, len).c_str());
+      ESP_LOGD(TAG, "Pump %u (0x%02X) acked command 0x%02X: %s", this->address_, this->wire_address_,
+               command, format_hex_pretty(payload, length).c_str());
       break;
   }
 }
 
-void PentairIntelliflo::publish_status_(const uint8_t *p) {
+void PentairIntellifloPump::publish_status_(const uint8_t *p) {
   const bool running = p[0] == PUMP_STARTED;
   const uint16_t watts = ((uint16_t) p[3] << 8) | p[4];
   const uint16_t rpm = ((uint16_t) p[5] << 8) | p[6];
@@ -264,87 +323,61 @@ void PentairIntelliflo::publish_status_(const uint8_t *p) {
   if (this->time_remaining_ != nullptr)
     this->time_remaining_->publish_state(p[11] * 60 + p[12]);
 
-  ESP_LOGI(TAG, "Status: %s, %u rpm, %u W, %u gpm, mode 0x%02X, drive 0x%02X, error 0x%02X",
-           running ? "started" : "stopped", rpm, watts, p[7], p[1], p[2], p[10]);
+  ESP_LOGI(TAG,
+           "Pump %u (0x%02X) status: %s, %u rpm, %u W, %u gpm, mode 0x%02X, drive 0x%02X, error 0x%02X",
+           this->address_, this->wire_address_, running ? "started" : "stopped", rpm, watts, p[7], p[1], p[2],
+           p[10]);
 }
 
-void PentairIntelliflo::queue_command_(uint8_t command, const std::vector<uint8_t> &payload) {
-  if (this->tx_queue_.size() >= MAX_TX_QUEUE) {
-    ESP_LOGW(TAG, "TX queue full, dropping command 0x%02X", command);
-    return;
-  }
+void PentairIntellifloPump::request_status() { this->parent_->queue_command_(this->wire_address_, 0x07, {}); }
 
-  // Everything from the 0xA5 up to the last payload byte is checksummed.
-  std::vector<uint8_t> body;
-  body.reserve(6 + payload.size());
-  body.push_back(0xA5);
-  body.push_back(0x00);  // protocol 0x00: pump messages
-  body.push_back(this->address_);
-  body.push_back(CONTROLLER_ADDRESS);
-  body.push_back(command);
-  body.push_back((uint8_t) payload.size());
-  body.insert(body.end(), payload.begin(), payload.end());
-
-  uint16_t sum = 0;
-  for (uint8_t b : body)
-    sum += b;
-
-  std::vector<uint8_t> frame;
-  frame.reserve(body.size() + 5);
-  frame.push_back(0xFF);  // idle padding so the pump's UART wakes up
-  frame.push_back(0x00);
-  frame.push_back(0xFF);
-  frame.insert(frame.end(), body.begin(), body.end());
-  frame.push_back((uint8_t) (sum >> 8));
-  frame.push_back((uint8_t) (sum & 0xFF));
-
-  this->tx_queue_.push_back(std::move(frame));
+void PentairIntellifloPump::set_remote_control(bool remote) {
+  this->parent_->queue_command_(this->wire_address_, 0x04, {(uint8_t) (remote ? 0xFF : 0x00)});
 }
 
-void PentairIntelliflo::request_status() { this->queue_command_(0x07, {}); }
-
-void PentairIntelliflo::set_remote_control(bool remote) {
-  this->queue_command_(0x04, {(uint8_t) (remote ? 0xFF : 0x00)});
+void PentairIntellifloPump::set_pump_running(bool running) {
+  this->parent_->queue_command_(this->wire_address_, 0x06, {running ? PUMP_STARTED : PUMP_STOPPED});
 }
 
-void PentairIntelliflo::set_pump_running(bool running) {
-  this->queue_command_(0x06, {running ? PUMP_STARTED : PUMP_STOPPED});
-}
-
-void PentairIntelliflo::set_speed_rpm(uint16_t rpm) {
+void PentairIntellifloPump::set_speed_rpm(uint16_t rpm) {
   rpm = std::min(rpm, MAX_RPM);
-  ESP_LOGD(TAG, "Setting speed to %u rpm", rpm);
-  this->queue_command_(0x01, {0x02, 0xC4, (uint8_t) (rpm >> 8), (uint8_t) (rpm & 0xFF)});
+  ESP_LOGD(TAG, "Setting pump %u (0x%02X) speed to %u rpm", this->address_, this->wire_address_, rpm);
+  this->parent_->queue_command_(this->wire_address_, 0x01,
+                               {0x02, 0xC4, (uint8_t) (rpm >> 8), (uint8_t) (rpm & 0xFF)});
 }
 
-void PentairIntelliflo::set_speed_gpm(uint8_t gpm) {
-  ESP_LOGD(TAG, "Setting flow to %u gpm", gpm);
-  this->queue_command_(0x01, {0x02, 0xE4, 0x00, gpm});
+void PentairIntellifloPump::set_speed_gpm(uint8_t gpm) {
+  ESP_LOGD(TAG, "Setting pump %u (0x%02X) flow to %u gpm", this->address_, this->wire_address_, gpm);
+  this->parent_->queue_command_(this->wire_address_, 0x01, {0x02, 0xE4, 0x00, gpm});
 }
 
-void PentairIntelliflo::set_program_speed(uint8_t program, uint16_t rpm) {
+void PentairIntellifloPump::set_program_speed(uint8_t program, uint16_t rpm) {
   if (program < 1 || program > 4) {
     ESP_LOGW(TAG, "Program must be 1-4, got %u", program);
     return;
   }
+
   rpm = std::min(rpm, MAX_RPM);
-  ESP_LOGD(TAG, "Storing %u rpm in external program %u", rpm, program);
-  this->queue_command_(0x01, {0x03, (uint8_t) (0x26 + program), (uint8_t) (rpm >> 8),
-                              (uint8_t) (rpm & 0xFF)});
+  ESP_LOGD(TAG, "Storing %u rpm in pump %u (0x%02X) external program %u", rpm, this->address_,
+           this->wire_address_, program);
+  this->parent_->queue_command_(this->wire_address_, 0x01,
+                               {0x03, (uint8_t) (0x26 + program), (uint8_t) (rpm >> 8),
+                                (uint8_t) (rpm & 0xFF)});
 }
 
-void PentairIntelliflo::run_program(uint8_t program) {
+void PentairIntellifloPump::run_program(uint8_t program) {
   if (program > 4) {
     ESP_LOGW(TAG, "Program must be 0-4, got %u", program);
     return;
   }
-  ESP_LOGD(TAG, "Activating external program %u", program);
-  this->queue_command_(0x01, {0x03, 0x21, 0x00, (uint8_t) (program * 8)});
+
+  ESP_LOGD(TAG, "Activating pump %u (0x%02X) external program %u", this->address_, this->wire_address_, program);
+  this->parent_->queue_command_(this->wire_address_, 0x01, {0x03, 0x21, 0x00, (uint8_t) (program * 8)});
 }
 
-void PentairIntelliflo::set_speed_index(uint8_t index) {
-  ESP_LOGD(TAG, "Selecting built-in speed 0x%02X", index);
-  this->queue_command_(0x05, {index});
+void PentairIntellifloPump::set_speed_index(uint8_t index) {
+  ESP_LOGD(TAG, "Selecting pump %u (0x%02X) built-in speed 0x%02X", this->address_, this->wire_address_, index);
+  this->parent_->queue_command_(this->wire_address_, 0x05, {index});
 }
 
 }  // namespace pentair_intelliflo
