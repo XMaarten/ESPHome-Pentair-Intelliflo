@@ -199,12 +199,6 @@ Frames received from registered pump addresses are routed to the corresponding p
 
 `multipump-example.yaml` contains a smaller two-pump example focused on the shared-bus configuration.
 
-## Background and credits
-
-The protocol, parser and ESPHome fixes used as the basis for this work were developed in the `gamer22026/ESPHome-Pentair-Intelliflo` fork of the original `nicostrown/ESPHome-Pentair-Intelliflo` project.
-
-The multi-pump changes refactor bus ownership into one controller and add multiple pump objects on the same UART/RS-485 interface.
-
 ## Protocol references
 
 - [Controlling an IntelliFlo pump from Home Assistant](https://www.yoctopuce.com/EN/article/controlling-an-intelliflo-pump-from-home-assistant)
